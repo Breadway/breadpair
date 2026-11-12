@@ -31,6 +31,10 @@ import android.os.ParcelUuid;
 import android.os.PowerManager;
 import android.util.Log;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -55,7 +59,11 @@ public class CompanionService extends Service {
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private ServerSocket wakeup;
     private BluetoothLeAdvertiser advertiser;
+
+    /** Port the laptop dials over Tailscale. Matches internal/wakeup.Port. */
+    static final int WAKE_PORT = 45550;
     private BluetoothGattServer gatt;
     private BluetoothGattCharacteristic statusChar;
     private WifiP2pManager p2p;
@@ -120,7 +128,51 @@ public class CompanionService extends Service {
             return START_NOT_STICKY;
         }
         startRadio();
+        startWakeup();
         return START_STICKY;
+    }
+
+    // Tailscale reaches the phone when its BLE advertisements do not leave the
+    // radio. One TCP connection carries the group credentials and nothing else.
+    private void startWakeup() {
+        if (wakeup != null) return;
+        new Thread(() -> {
+            try {
+                ServerSocket server = new ServerSocket(WAKE_PORT);
+                wakeup = server;
+                setState("Listening on " + WAKE_PORT);
+                while (!server.isClosed()) {
+                    Socket client = server.accept();
+                    try {
+                        client.setSoTimeout(5000);
+                        byte[] buf = readFully(client.getInputStream(), 96);
+                        Protocol.Credential cred = Protocol.decode(buf);
+                        setState("Joining " + cred.ssid);
+                        join(cred);
+                    } catch (RuntimeException | IOException e) {
+                        Log.w(TAG, "bad wakeup", e);
+                        setState("The laptop's message could not be read");
+                    } finally {
+                        client.close();
+                    }
+                }
+            } catch (IOException e) {
+                if (wakeup == null || !wakeup.isClosed()) Log.w(TAG, "wakeup listener", e);
+            }
+        }, "breadpair-wakeup").start();
+    }
+
+    private static byte[] readFully(InputStream in, int max) throws IOException {
+        byte[] buf = new byte[max];
+        int n = 0;
+        while (n < 4) {
+            int r = in.read(buf, n, max - n);
+            if (r < 0) break;
+            n += r;
+        }
+        byte[] out = new byte[n];
+        System.arraycopy(buf, 0, out, 0, n);
+        return out;
     }
 
     // WIFI_MODE_FULL_HIGH_PERF is deprecated in name only: API 34 kept the
@@ -162,10 +214,16 @@ public class CompanionService extends Service {
         // rejects that with "vendorInterval invalid: 0" and then never puts
         // the advertisement on air, while still reporting success. BALANCED
         // is an interval it accepts.
+        // setDiscoverable defaults to false on Android 15, and a
+        // non-discoverable advertisement is dropped by scanners even though
+        // the controller reports it as running. Non-connectable as well: this
+        // MediaTek controller transmits connectable advertisements that never
+        // arrive, while a plain broadcast does.
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-                .setConnectable(true)
+                .setConnectable(false)
+                .setDiscoverable(true)
                 .setTimeout(0)
                 .build();
         // A legacy advertisement is 31 bytes. This platform also inserts the
@@ -183,8 +241,8 @@ public class CompanionService extends Service {
                 .setIncludeDeviceName(false)
                 .addServiceUuid(new ParcelUuid(Protocol.SERVICE))
                 .build();
-        setState("advertising payload " + data.getManufacturerSpecificData().size()
-                + " uuid " + data.getServiceUuids());
+        byte[] payload = Protocol.payload(Protocol.FLAG_ARMED, 0, null);
+        setState("payload bytes " + payload.length);
         advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback);
 
         p2p = (WifiP2pManager) getSystemService(WIFI_P2P_SERVICE);
@@ -281,6 +339,9 @@ public class CompanionService extends Service {
         if (p2p != null && channel != null) {
             p2p.removeGroup(channel, null);
             p2p.cancelConnect(channel, null);
+        }
+        if (wakeup != null) {
+            try { wakeup.close(); } catch (IOException ignored) {}
         }
         handler.removeCallbacksAndMessages(null);
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();

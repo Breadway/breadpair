@@ -17,6 +17,7 @@ import (
 	"breadway.dev/breadpair/internal/nm"
 	"breadway.dev/breadpair/internal/protocol"
 	"breadway.dev/breadpair/internal/state"
+	"breadway.dev/breadpair/internal/wakeup"
 	"breadway.dev/breadpair/internal/wifi"
 )
 
@@ -30,6 +31,9 @@ type Options struct {
 	ADBTimeout  time.Duration
 	Adapter     string
 	NoScrcpy    bool
+	// Wake is host:port of the companion's Tailscale listener. When set, the
+	// credentials go over that link and BLE is not required.
+	Wake string
 }
 
 // DefaultOptions matches the Yoga Slim 7 this was built on.
@@ -69,7 +73,7 @@ func Up(ctx context.Context, opt Options) error {
 	}
 
 	var hit *ble.Hit
-	if !opt.SkipBLE {
+	if opt.Wake == "" && !opt.SkipBLE {
 		fmt.Printf("scanning BLE for the companion (%s)\n", opt.BLETimeout)
 		found, err := ble.Scan(ctx, opt.Adapter, opt.BLETimeout)
 		if err != nil {
@@ -101,8 +105,17 @@ func Up(ctx context.Context, opt Options) error {
 		fmt.Printf("station reconnected to %s at %s\n", ws.Station.SSID, ws.Station.IP)
 	}
 
+	cred := protocol.Credential{SSID: ws.Group.SSID, Passphrase: ws.Group.Passphrase, Frequency: ws.Group.Frequency}
+	if opt.Wake != "" {
+		fmt.Printf("sending the group credentials to %s\n", opt.Wake)
+		wakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := wakeup.Send(wakeCtx, opt.Wake, cred)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("%w\nphone: the group is up; run 'phone down' to tear it down", err)
+		}
+	}
 	if hit != nil {
-		cred := protocol.Credential{SSID: ws.Group.SSID, Passphrase: ws.Group.Passphrase, Frequency: ws.Group.Frequency}
 		fmt.Printf("sending the group credentials to %s\n", hit.Address)
 		pushCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		err := ble.Push(pushCtx, hit.Address, cred)

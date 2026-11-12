@@ -44,6 +44,9 @@ public class MainActivity extends Activity {
         Button stop = findViewById(R.id.stop);
         Button battery = findViewById(R.id.battery);
         arm.setOnClickListener(v -> arm());
+        // Opening the app is enough. The service is what matters, and the
+        // button is easy to miss when the screen is driven remotely.
+        if (hasPermissions()) startForegroundService(new Intent(this, CompanionService.class));
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, CompanionService.class));
             status.setText("Stopped");
