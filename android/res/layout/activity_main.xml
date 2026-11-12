@@ -48,6 +48,6 @@
             android:layout_height="wrap_content"
             android:paddingTop="24dp"
             android:textSize="13sp"
-            android:text="One-time setup: Developer options on, Wireless debugging on, and pair the laptop once from Wireless debugging. Then Arm. The laptop finds this phone over Bluetooth and this app joins its Wi-Fi Direct group." />
+            android:text="One-time setup: Developer options on, Wireless debugging on, and pair the laptop once from Wireless debugging. Then Arm, allow background use, and turn the screen off. The laptop finds this phone over Bluetooth and this app joins its Wi-Fi Direct group with the display dark. scrcpy turns the screen off again if you wake it." />
     </LinearLayout>
 </ScrollView>

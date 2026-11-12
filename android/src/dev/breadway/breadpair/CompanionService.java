@@ -19,11 +19,14 @@ import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.wifi.WifiManager;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pGroup;
 import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.ParcelUuid;
 import android.os.PowerManager;
 import android.util.Log;
@@ -34,10 +37,14 @@ import java.nio.charset.StandardCharsets;
  * Foreground service that advertises the breadpair BLE service and joins the
  * laptop's Wi-Fi Direct group when the laptop writes the credentials.
  *
- * A partial wake lock is held the whole time the service is armed. That is
- * the most Android allows without root: the CPU stays awake, but an OEM can
- * still freeze the process, which is why the activity asks for the
- * battery-unrestricted exemption.
+ * Two locks are held the whole time the service is armed. The partial wake
+ * lock keeps the CPU scheduled with the screen off. The Wi-Fi lock, taken at
+ * high-performance mode, stops the driver sleeping the radio when the display
+ * goes dark, which is what otherwise kills Wi-Fi Direct. Neither turns the
+ * screen on. scrcpy switches the panel off once it is connected.
+ *
+ * An OEM can still freeze the process. The activity asks for the
+ * battery-unrestricted exemption so Nothing OS does not.
  */
 public class CompanionService extends Service {
     static final String TAG = "breadpair";
@@ -46,6 +53,8 @@ public class CompanionService extends Service {
     static final String CHANNEL = "breadpair";
 
     private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private BluetoothLeAdvertiser advertiser;
     private BluetoothGattServer gatt;
     private BluetoothGattCharacteristic statusChar;
@@ -97,6 +106,11 @@ public class CompanionService extends Service {
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "breadpair:armed");
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire();
+
+        WifiManager wifi = (WifiManager) getSystemService(WIFI_SERVICE);
+        wifiLock = createRadioLock(wifi);
+        wifiLock.setReferenceCounted(false);
+        wifiLock.acquire();
     }
 
     @Override
@@ -107,6 +121,15 @@ public class CompanionService extends Service {
         }
         startRadio();
         return START_STICKY;
+    }
+
+    // WIFI_MODE_FULL_HIGH_PERF is deprecated in name only: API 34 kept the
+    // value and there is no replacement that holds the radio out of power
+    // save. The plain full mode lets the driver sleep when the screen is off,
+    // which drops the P2P group.
+    @SuppressWarnings("deprecation")
+    private static WifiManager.WifiLock createRadioLock(WifiManager wifi) {
+        return wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "breadpair:radio");
     }
 
     private void startRadio() {
@@ -164,7 +187,7 @@ public class CompanionService extends Service {
         p2p.connect(channel, config, new WifiP2pManager.ActionListener() {
             @Override public void onSuccess() {
                 setState("Connecting to " + cred.ssid);
-                watchGroup();
+                watchGroup(0);
             }
             @Override public void onFailure(int reason) {
                 setState("Wi-Fi Direct connect failed (" + reason + ")");
@@ -172,13 +195,19 @@ public class CompanionService extends Service {
         });
     }
 
-    private void watchGroup() {
+    private void watchGroup(int attempt) {
         p2p.requestGroupInfo(channel, group -> {
             if (group == null) {
-                setState("Waiting for the group");
+                if (attempt < 15) {
+                    setState("Waiting for the group");
+                    handler.postDelayed(() -> watchGroup(attempt + 1), 2000);
+                } else {
+                    setState("The laptop's group never formed");
+                }
                 return;
             }
             StringBuilder sb = new StringBuilder("In group ").append(group.getNetworkName());
+            sb.append(", screen can be off");
             if (group.isGroupOwner()) sb.append(" (this phone is the owner, which is wrong)");
             setState(sb.toString());
             publishStatus(group);
@@ -188,7 +217,14 @@ public class CompanionService extends Service {
     private void publishStatus(WifiP2pGroup group) {
         if (statusChar == null) return;
         String text = group.getNetworkName() == null ? "" : group.getNetworkName();
-        statusChar.setValue(text.getBytes(StandardCharsets.UTF_8)); // API 33 deprecates this; min is 30
+        // setValue(byte[]) is deprecated from API 33 with no replacement that
+        // accepts the bytes directly. minSdk is 30, so this is the call.
+        setValueCompat(statusChar, text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void setValueCompat(BluetoothGattCharacteristic c, byte[] bytes) {
+        c.setValue(bytes);
     }
 
     private void setState(String s) {
@@ -229,6 +265,8 @@ public class CompanionService extends Service {
             p2p.removeGroup(channel, null);
             p2p.cancelConnect(channel, null);
         }
+        handler.removeCallbacksAndMessages(null);
+        if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         super.onDestroy();
     }

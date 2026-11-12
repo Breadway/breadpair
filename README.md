@@ -117,20 +117,36 @@ Then `phone up` from the laptop.
 
 ## Screen off
 
-The companion is a foreground service with a persistent notification and a
-partial wake lock, so the CPU stays awake and BLE advertising continues while
-the screen is off. That is as far as stock Android goes.
+`phone up` is meant to be run with the phone locked and the screen off. The
+companion has no activity on screen while it works. Arm it once, then the
+process that keeps running is a foreground service, which is Android's
+mechanism for work that must outlive the display. While it is armed it holds
+two locks:
 
-What it cannot promise:
+- a partial wake lock, so the CPU stays scheduled with the screen off
+- a Wi-Fi lock in high-performance mode, so the driver does not sleep the
+  radio when the display goes dark
 
-- Nothing OS can still freeze the service after a while. The battery
-  exemption is the mitigation, not a guarantee. If `phone up` stops finding
-  the phone, open the app once so the process is restarted.
-- Wi-Fi Direct on Android will not join a group while the phone is in deep
-  doze unless the process is awake. The wake lock covers the armed state.
-  Force-stopping the app, or the OEM killing it, ends the session.
-- Wireless debugging itself is a Developer options feature. Android disables
-  it after a reboot until the phone is unlocked once. There is no way around
+The second one is the part that matters for Wi-Fi Direct. Android's default
+is to power-save the radio as soon as the screen turns off, and a
+power-saving radio drops the P2P group and stops answering DHCP. The lock
+prevents that. BLE advertising also continues, because the CPU is awake to
+service it.
+
+Nothing in the companion turns the screen on. `scrcpy --turn-screen-off`
+switches the panel off again after it connects, so picking the phone up
+mid-session does not leave it lit.
+
+What it still cannot promise:
+
+- Nothing OS can freeze even a foreground service after a long idle. The
+  battery-unrestricted exemption is the mitigation, and the app asks for it.
+  If `phone up` stops finding the phone, open the app once so the process is
+  restarted.
+- Force-stopping the app, or swiping it away on a build that ignores the
+  foreground service, ends the session.
+- Wireless debugging is a Developer options feature. Android disables it
+  after a reboot until the phone is unlocked once. There is no way around
   that without root.
 - The first `adb` authorisation is a prompt on the phone. It is remembered
   after that.
