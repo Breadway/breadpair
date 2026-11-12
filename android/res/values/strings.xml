@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">breadpair</string>
+    <string name="channel_name">breadpair</string>
+    <string name="channel_desc">Keeps the phone reachable for the laptop.</string>
+    <string name="notification_title">breadpair is armed</string>
+    <string name="notification_waiting">Waiting for the laptop.</string>
+</resources>

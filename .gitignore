@@ -1,0 +1,10 @@
+phone
+android/*.apk
+android/gen
+android/classes
+android/dex
+android/*.apk.idsig
+android/unsigned.apk
+android/aligned.apk
+android/linked.apk
+android/compiled.zip

@@ -1,0 +1,14 @@
+# breadpair needs root for the supplicant, the group interface, DHCP, and the
+# firewall rule. It never asks for a password: phone calls `sudo -n` and fails
+# immediately when this file is missing.
+#
+# Install with:
+#   sudo install -m 440 dist/sudoers.d-breadpair /etc/sudoers.d/breadpair
+#   sudo visudo -cf /etc/sudoers.d/breadpair
+
+breadway ALL=(root) NOPASSWD: /usr/bin/wpa_supplicant, /usr/bin/wpa_cli, /usr/bin/ip, /usr/bin/iw, /usr/bin/nmcli, /usr/bin/dnsmasq, /usr/bin/ufw, /usr/bin/find, /usr/bin/cat, /usr/bin/touch, /usr/bin/chown, /usr/bin/mkdir, /usr/bin/rm, /usr/bin/kill, /usr/bin/ss
+
+# The DHCP helper is the phone binary re-execed as root, because the client
+# port is privileged and NetworkManager already holds it. The argument is
+# fixed so this cannot run arbitrary phone subcommands.
+breadway ALL=(root) NOPASSWD: /usr/local/bin/phone dhcp4 wlan0, /home/breadway/Projects/breadpair/phone dhcp4 wlan0
