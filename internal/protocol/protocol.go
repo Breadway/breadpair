@@ -14,9 +14,15 @@ import (
 	"net"
 )
 
-// ServiceUUID is the 128-bit UUID the companion advertises and the laptop
-// filters on. Picked at random; it is not a registered Bluetooth SIG UUID.
+// ServiceUUID is the 128-bit UUID the companion exposes over GATT. Picked at
+// random; it is not a registered Bluetooth SIG UUID.
 const ServiceUUID = "8a6e1b10-7c4d-4e2a-9f31-b6d0a4c85e17"
+
+// ServiceAlias is the 16-bit UUID the companion puts in the advertisement
+// itself. A legacy advertisement is 31 bytes and the 128-bit UUID does not fit
+// next to the manufacturer payload, so the alias is what a scanner matches
+// and the full UUID is served in the scan response.
+const ServiceAlias = "1b10"
 
 // ControlUUID is the GATT characteristic the laptop writes the group
 // credentials to. Write Without Response, so it works while the phone is

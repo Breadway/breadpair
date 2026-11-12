@@ -110,7 +110,10 @@ func Scan(ctx context.Context, adapter string, timeout time.Duration) (Hit, erro
 	// menu scan is the LE-only menu. transport le keeps the scan off the
 	// classic inquiry, which is slow and irrelevant here.
 	fmt.Fprintf(stdin, "menu scan\ntransport le\nduplicate-data on\nback\n")
-	fmt.Fprintf(stdin, "select %s\nset-scan-filter-uuids %s\nscan on\n", adapter, protocol.ServiceUUID)
+	// No UUID filter. The phone's advertisement carries only the manufacturer
+	// payload, because the service UUID does not fit in a legacy advertisement
+	// on this handset. The payload magic is the match.
+	fmt.Fprintf(stdin, "select %s\nscan on\n", adapter)
 
 	hits := make(chan Hit, 1)
 	errs := make(chan error, 1)
@@ -190,9 +193,12 @@ func readScan(ctx context.Context, r io.Reader) (Hit, error) {
 			}
 		}
 		for addr, p := range seen {
-			if !p.uuid || len(p.raw) == 0 {
+			if len(p.raw) == 0 {
 				continue
 			}
+			// The service UUID rides in the scan response because it does not
+			// fit in the advertisement next to the payload. A filtered scan
+			// does not surface the scan response, so the payload is the match.
 			payload, err := protocol.Decode(p.raw)
 			if err != nil {
 				continue

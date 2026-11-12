@@ -64,7 +64,7 @@ public class CompanionService extends Service {
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override public void onStartSuccess(AdvertiseSettings settings) {
-            setState("Advertising");
+            setState("Advertising mode " + settings.getMode() + " timeout " + settings.getTimeout());
         }
         @Override public void onStartFailure(int error) {
             setState("BLE advertising failed (" + error + ")");
@@ -158,17 +158,34 @@ public class CompanionService extends Service {
             setState("This adapter cannot advertise");
             return;
         }
+        // LOW_LATENCY asks for a 100ms interval. This handset's controller
+        // rejects that with "vendorInterval invalid: 0" and then never puts
+        // the advertisement on air, while still reporting success. BALANCED
+        // is an interval it accepts.
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                 .setConnectable(true)
+                .setTimeout(0)
                 .build();
+        // A legacy advertisement is 31 bytes. This platform also inserts the
+        // flags field and enough of its own data that a service UUID no longer
+        // fits beside the payload, which comes back as
+        // ADVERTISE_FAILED_DATA_TOO_LARGE. The manufacturer payload is what the
+        // laptop matches on, so it is the only thing in the advertisement. The
+        // full service UUID goes in the scan response.
         AdvertiseData data = new AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceUuid(new ParcelUuid(Protocol.SERVICE))
+                .setIncludeTxPowerLevel(false)
                 .addManufacturerData(Protocol.COMPANY_ID, Protocol.payload(Protocol.FLAG_ARMED, 0, null))
                 .build();
-        advertiser.startAdvertising(settings, data, advertiseCallback);
+        AdvertiseData scanResponse = new AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .addServiceUuid(new ParcelUuid(Protocol.SERVICE))
+                .build();
+        setState("advertising payload " + data.getManufacturerSpecificData().size()
+                + " uuid " + data.getServiceUuids());
+        advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback);
 
         p2p = (WifiP2pManager) getSystemService(WIFI_P2P_SERVICE);
         channel = p2p.initialize(this, getMainLooper(), () -> setState("Wi-Fi Direct channel closed"));

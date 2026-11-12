@@ -34,15 +34,19 @@ classes: gen/dev/breadway/breadpair/R.java $(SRC)
 	javac --release 17 -Xlint:-deprecation -classpath $(PLATFORM) -d classes \
 		$(SRC) gen/dev/breadway/breadpair/R.java
 
-dex: classes
+dex/classes.dex: classes
 	mkdir -p dex
-	$(D8) --min-api 30 --output dex classes/dev/breadway/breadpair/*.class
+	find classes -name '*.class' > classes.list
+	$(D8) --min-api 30 --output dex @classes.list
+	touch dex/classes.dex
 
-unsigned.apk: dex gen/dev/breadway/breadpair/R.java
+dex: dex/classes.dex
+
+unsigned.apk: dex/classes.dex gen/dev/breadway/breadpair/R.java $(RES) AndroidManifest.xml
 	$(AAPT2) compile --dir res -o compiled.zip
 	$(AAPT2) link -I $(PLATFORM) --manifest AndroidManifest.xml \
 		-o unsigned.apk --min-sdk-version 30 --target-sdk-version 35 compiled.zip
-	cd dex && zip -q -u ../unsigned.apk classes.dex
+	cd dex && zip -q -j ../unsigned.apk classes.dex
 	rm -f compiled.zip
 
 aligned.apk: unsigned.apk
